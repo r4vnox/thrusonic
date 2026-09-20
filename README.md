@@ -16,9 +16,23 @@
 > Harici bir USB mikrofon ile ultrasonik moda geçmek için `tsonic-send.c` ve `tsonic-recv.c`  
 > dosyalarındaki `FREQ_0` ve `FREQ_1` değerlerini değiştirmeniz yeterlidir.
 >
+>
+> ⚠️ **NOT (Hamming Kodu):**  
+> Hamming(7,4) hata düzeltme kodu `USE_HAMMING` flag'i ile opsiyonel olarak eklendi.  
+> Ancak mevcut ortam gurültüsü seviyesinde (2+ bit hata) Hamming yetersiz kalıyor ve  
+> yanlış düzeltme yapabiliyor. Varsayılan olarak **kapalı** (0) bırakılmıştır.  
+> İleride **SECDED** veya **Reed-Solomon** gibi daha güçlü algoritmalarla değiştirilecektir.
+>
+>
+> 📊 **Test Sonuçları (Stabil Ayarlar):**  
+> - **Frekanslar:** 6.000 Hz (0 biti) / 8.000 Hz (1 biti)  
+> - **Bit süresi:** 20ms (50 bit/saniye)  
+> - **Başarılı test:** "Merhaba ThruSonic!" iletildi ✅  
+> - Ortam gürültüsü transfer kararlılığını etkiler, sessiz ortam önerilir.
+>
 > 📌 **Yapılacaklar (TODO):**  
 > - [ ] Harici mikrofon ile ultrasonik mod testi  
-> - [ ] Hamming Kodu ile ileri seviye hata düzeltme  
+> - [x] Hamming Kodu ile ileri seviye hata düzeltme (sorunlu) 
 > - [ ] Text dışında binary dosya transferi (resim, PDF, vs.)  
 > - [ ] Gerçek zamanlı (real-time) transfer modu  
 > - [ ] GUI (Grafik Arayüz) geliştirme

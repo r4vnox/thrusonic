@@ -3,13 +3,41 @@
 #include <math.h>
 #include <fftw3.h>
 
+#define USE_HAMMING 0  // 0 = Normal (çalışan), 1 = Hamming (deneysel)
 #define SAMPLE_RATE 44100
 #define BIT_DURATION 0.01
-#define FREQ_0 8000  //düşürüldü şuanlık
-#define FREQ_1 10000
+#define FREQ_0 6000
+#define FREQ_1 8000
 #define N 882
 #define SYNC_BYTE 0xD5
-#define MAG_THRESHOLD 3.0
+#define MAG_THRESHOLD 1.0
+
+// Hamming(7,4) decode + tek bıt hata düzeltmee
+int hamming_decode(int codeword, int *corrected) {
+    int p1 = (codeword >> 6) & 1;
+    int p2 = (codeword >> 5) & 1;
+    int d1 = (codeword >> 4) & 1;
+    int p3 = (codeword >> 3) & 1;
+    int d2 = (codeword >> 2) & 1;
+    int d3 = (codeword >> 1) & 1;
+    int d4 = codeword & 1;
+
+    int s1 = p1 ^ d1 ^ d2 ^ d4;
+    int s2 = p2 ^ d1 ^ d3 ^ d4;
+    int s3 = p3 ^ d2 ^ d3 ^ d4;
+    int syndrome = (s3 << 2) | (s2 << 1) | s1;
+
+    *corrected = 0;
+    if (syndrome != 0) {
+        *corrected = 1;
+        codeword ^= (1 << (7 - syndrome));
+        d1 = (codeword >> 4) & 1;
+        d2 = (codeword >> 2) & 1;
+        d3 = (codeword >> 1) & 1;
+        d4 = codeword & 1;
+    }
+    return (d1 << 3) | (d2 << 2) | (d3 << 1) | d4;
+}
 
 int main(int argc, char *argv[]) {
     if (argc < 3) {
@@ -17,62 +45,49 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // 1. Kaydedilen ham ses dosyasını aç
     FILE *file = fopen(argv[1], "rb");
-    if (file == NULL) {
-        perror("Kayıt dosyası açılamadı");
-        return 1;
-    }
+    if (file == NULL) { perror("Kayıt dosyası açılamadı"); return 1; }
 
-    // 2. Çıktı dosyasını oluştur
     FILE *out_file = fopen(argv[2], "wb");
-    if (out_file == NULL) {
-        perror("Çıktı dosyası oluşturulamadı");
-        fclose(file);
-        return 1;
-    }
+    if (out_file == NULL) { perror("Çıktı dosyası oluşturulamadı"); fclose(file); return 1; }
 
-    // 3. FFTW için bellek ayır
     double *in = (double*) fftw_malloc(sizeof(double) * N);
     fftw_complex *out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * (N/2 + 1));
     fftw_plan plan = fftw_plan_dft_r2c_1d(N, in, out, FFTW_ESTIMATE);
-
     short *buffer = (short*) malloc(sizeof(short) * N);
 
-    // Frekans bin indeksleri
     int bin_18k = (int)(FREQ_0 * N / SAMPLE_RATE);
     int bin_19k = (int)(FREQ_1 * N / SAMPLE_RATE);
 
-    // Alıcı durum değişkenleri
+    // ==================== ALICI DURUM DEĞİŞKENLERİ ====================
     int synced = 0;
     int silent_count = 0;
-    int bit_count = 0;
-    unsigned char current_byte = 0;
     int total_bits = 0;
     int sync_buffer[8] = {0};
 
+    // Normal mod değişkenleri
+    unsigned char current_byte = 0;
+    int bit_count = 0;
+
+    // Hamming modu değişkenleri
+    int codeword = 0;
+    int hamming_bit_count = 0;
+    int high_nibble = 0;
+    int nibble_count = 0;
+    int total_corrected = 0;
+    // ===================================================================
+
     printf("[ThruSonic Recv] Kayıt analiz ediliyor, preamble aranıyor...\n");
 
-    // 4. Dosyayı 441'eerli örnekler halinde oku
     while (fread(buffer, sizeof(short), N, file) == N) {
-        // Normalize et
-        for (int i = 0; i < N; i++) {
-            in[i] = (double)buffer[i] / 32768.0;
-        }
-
-        // FFT'yi çalıştır
+        for (int i = 0; i < N; i++) in[i] = (double)buffer[i] / 32768.0;
         fftw_execute(plan);
 
-        // 18kHz ve 19kHz genlikleri
         double mag_18k = sqrt(out[bin_18k][0]*out[bin_18k][0] + out[bin_18k][1]*out[bin_18k][1]);
         double mag_19k = sqrt(out[bin_19k][0]*out[bin_19k][0] + out[bin_19k][1]*out[bin_19k][1]);
 
-        // Sessizlik kontrolü (sync öncesi)
-        if (!synced && mag_18k < MAG_THRESHOLD && mag_19k < MAG_THRESHOLD) {
-            continue;
-        }
+        if (!synced && mag_18k < MAG_THRESHOLD && mag_19k < MAG_THRESHOLD) continue;
 
-        // Veri bitti mi? Uzun sessizlik varsa dur
         if (mag_18k < MAG_THRESHOLD && mag_19k < MAG_THRESHOLD) {
             silent_count++;
             if (silent_count > 25) break;
@@ -80,10 +95,8 @@ int main(int argc, char *argv[]) {
             silent_count = 0;
         }
 
-	// Baskın frekansa göre bit belirle
         int bit = (mag_19k > mag_18k) ? 1 : 0;
 
-        // Preamble arama
         if (!synced) {
             for (int k = 0; k < 7; k++) sync_buffer[k] = sync_buffer[k+1];
             sync_buffer[7] = bit;
@@ -101,45 +114,56 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        // Veri okuma (8 data + 1 paritty = 9 bit)
+        // ==================== VERİ OKUMA ====================
+#if USE_HAMMING
+        codeword = (codeword << 1) | bit;
+        hamming_bit_count++;
+        total_bits++;
+
+        if (hamming_bit_count == 7) {
+            int corrected;
+            int nibble = hamming_decode(codeword, &corrected);
+            if (corrected) {
+                total_corrected++;
+                fprintf(stderr, "[HAMMING] 1-bit hata düzeltildi!\n");
+            }
+            if (nibble_count == 0) {
+                high_nibble = nibble;
+                nibble_count = 1;
+            } else {
+                unsigned char byte = (high_nibble << 4) | nibble;
+                fwrite(&byte, 1, 1, out_file);
+                nibble_count = 0;
+            }
+            codeword = 0;
+            hamming_bit_count = 0;
+        }
+#else
         current_byte = (current_byte << 1) | bit;
         bit_count++;
         total_bits++;
 
-        if (bit_count == 9) {
-            // Son bit parity, kalan 8 bit data
-            int data_byte = (current_byte >> 1) & 0xFF;
-            int received_parity = current_byte & 1;
-
-            // Parity kontrolü
-            int calc_parity = 0;
-            for (int i = 0; i < 8; i++) {
-                if ((data_byte >> i) & 1) calc_parity ^= 1;
-            }
-
-            if (calc_parity == received_parity) {
-                fwrite(&data_byte, 1, 1, out_file);
-            } else {
-                fprintf(stderr, "[HATA] Parity hatası! Byte atlandı.\n");
-            }
-
+        if (bit_count == 8) {
+            fwrite(&current_byte, 1, 1, out_file);
             current_byte = 0;
             bit_count = 0;
         }
+#endif
+        // ==================================================
     }
 
-    if (!synced) {
-        fprintf(stderr, "[UYARI] Preamble bulunamadı!\n");
-    }
+    if (!synced) fprintf(stderr, "[UYARI] Preamble bulunamadı!\n");
 
-    printf("[Tamamlandı] Toplam %d bit işlendi, dosya oluşturuldu: %s\n", total_bits, argv[2]);
+#if USE_HAMMING
+    printf("[Tamamlandı] Toplam %d bit, %d hata düzeltildi. Dosya: %s\n",
+           total_bits, total_corrected, argv[2]);
+#else
+    printf("[Tamamlandı] Toplam %d bit işlendi. Dosya: %s\n", total_bits, argv[2]);
+#endif
 
     fftw_destroy_plan(plan);
-    fftw_free(in);
-    fftw_free(out);
+    fftw_free(in); fftw_free(out);
     free(buffer);
-    fclose(file);
-    fclose(out_file);
-
+    fclose(file); fclose(out_file);
     return 0;
 }
