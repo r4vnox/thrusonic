@@ -5,8 +5,9 @@
 
 #define SAMPLE_RATE 44100
 #define BIT_DURATION 0.02 // Her bir bit 10ms sürecek (100 bit/saniye)
-#define FREQ_0 8000       // 0 biti için frekans
-#define FREQ_1 10000      // 1 biti için frekans (laptop zor duyduğu için suanlık düşürüldü!)
+#define FREQ_0 6000       // 0 biti için frekans
+#define FREQ_1 8000       // 1 biti için frekans (laptop zor duyduğu için suanlık düşürüldü!)
+#define USE_HAMMING 0  // 0 = Normal (çalışan), 1 = Hamming (deneysel)
 
 // ALSA için global değişkenler
 snd_pcm_t *handle;
@@ -36,6 +37,18 @@ void play_tone(double frequency, double duration) {
         }
         snd_pcm_writei(handle, buffer, remainder);
     }
+}
+
+// Hamming(7,4) encode: 4 data biti  -> 7 kod bıtı
+int hamming_encode(int data) {
+    int d1 = (data >> 3) & 1;
+    int d2 = (data >> 2) & 1;
+    int d3 = (data >> 1) & 1;
+    int d4 = data & 1;
+    int p1 = d1 ^ d2 ^ d4;
+    int p2 = d1 ^ d3 ^ d4;
+    int p3 = d2 ^ d3 ^ d4;
+    return (p1 << 6) | (p2 << 5) | (d1 << 4) | (p3 << 3) | (d2 << 2) | (d3 << 1) | d4;
 }
 
 int main(int argc, char *argv[]) {
@@ -87,17 +100,23 @@ int main(int argc, char *argv[]) {
 
     printf("[ThruSonic Send] Dosya FSK modülasyonu ile gönderiliyor...\n");
 
-    // 4. Dosyayı byte byte oku, parity bit ekleyerek gönder
     int ch;
     while ((ch = fgetc(file)) != EOF) {
-        int parity = 0;
+#if USE_HAMMING
+        // Hamming(7,4) Modu
+        int high = (ch >> 4) & 0x0F;
+        int low = ch & 0x0F;
+        int cw1 = hamming_encode(high);
+        int cw2 = hamming_encode(low);
+        for (int i = 6; i >= 0; i--) play_tone(((cw1 >> i) & 1) ? FREQ_1 : FREQ_0, BIT_DURATION);
+        for (int i = 6; i >= 0; i--) play_tone(((cw2 >> i) & 1) ? FREQ_1 : FREQ_0, BIT_DURATION);
+#else
+        // Normal mod (8 bit)
         for (int i = 7; i >= 0; i--) {
             int bit = (ch >> i) & 1;
-            if (bit) parity ^= 1;
             play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
         }
-        // Parity bitini gönder (1'lerin sayısını çift yapar)
-        play_tone(parity ? FREQ_1 : FREQ_0, BIT_DURATION);
+#endif
     }
 
     printf("[Gönderim Tamamlandı]\n");
