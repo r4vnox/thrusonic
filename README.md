@@ -13,16 +13,7 @@ transferi sağlayan C tabanlı bir "Data-over-Sound" aracı.
   Dönüşümü (FFT) algoritmalarını kullanarak anlık frekans analizi yapar. Gelen
   frekansları tekrar binary koda ve ardından orijinal dosyaya dönüştürür.
 
-## ✅ Çalışma Durumu
 
-| Özellik | Durum | Açıklama |
-|---------|-------|----------|
-| Text transferi | ✅ Çalışıyor | Sessiz ortamda "Merhaba ThruSonic!" başarıyla iletildi |
-| Preamble senkronizasyonu | ✅ Çalışıyor | 32-bit alternating + 0xD5 sync byte |
-| FSK modülasyonu | ✅ Çalışıyor | 6kHz (0) / 8kHz (1) frekansları |
-| SECDED(13,8) hata düzeltme | ✅ Çalışıyor | 1-bit düzeltme, 2-bit tespit |
-| Binary dosya transferi | ⚠️ Kısmi | Yüksek hata oranı (donanım sınırı) |
-| Ultrasonik mod (18/19 kHz) | ❌ Donanım gerekli | Laptop mikrofonu 18kHz algılamıyor |
 
 
 
@@ -92,7 +83,6 @@ cat cikti.txt
 head -c 32 /dev/urandom > binary_test.bin
 ./tsonic-rec & sleep 2 && ./tsonic-send binary_test.bin && sleep 2 && ./tsonic-recv recorded.raw cikti.bin
 cmp binary_test.bin cikti.bin
-
 
 
 
