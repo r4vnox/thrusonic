@@ -30,7 +30,7 @@ mikrofonları ve hoparlörleri** bu frekanslarda yeterli performansı
 - **Harici hoparlör** (tweeter'lı sistem)
 - `FREQ_0 = 18000`, `FREQ_1 = 19000` yapmak yeterlidir.
 
-## 🧠 Hata Düzeltme: Hamming → SECDED
+###  Hata Düzeltme: Hamming → SECDED
 
 İlk olarak **Hamming(7,4)** kodu denenmiştir. Ancak 2+ bit hatasında **yanlış
 düzeltme** yaptığı için veriyi daha da bozuyordu. Bu yüzden **SECDED(13,8)**
