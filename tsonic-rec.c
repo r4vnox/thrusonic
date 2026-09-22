@@ -3,7 +3,7 @@
 #include <alsa/asoundlib.h>
 
 #define SAMPLE_RATE 44100 // Generator ile aynı örnekleme hızı
-#define DURATION 30       // Kaç saniye kayıt yapılacağı
+#define DURATION 300      // Kaç saniye kayıt yapılacağı (test için yükseltildi. değiştirebilirsiniz.)
 
 int main() {
     int rc;

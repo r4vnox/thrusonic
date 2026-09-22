@@ -4,19 +4,16 @@
 #include <alsa/asoundlib.h>
 
 #define SAMPLE_RATE 44100
-#define BIT_DURATION 0.02 // Her bir bit 10ms sürecek (100 bit/saniye)
-#define FREQ_0 6000       // 0 biti için frekans
-#define FREQ_1 8000       // 1 biti için frekans (laptop zor duyduğu için suanlık düşürüldü!)
-#define USE_HAMMING 0  // 0 = Normal (çalışan), 1 = Hamming (deneysel)
+#define BIT_DURATION 0.05   // 50ms per bit (yavas ama güvenılir)
+#define FREQ_0 6000
+#define FREQ_1 8000
 
-// ALSA için global değişkenler
 snd_pcm_t *handle;
 snd_pcm_hw_params_t *params;
 snd_pcm_uframes_t frames;
 int dir;
 short *buffer;
 
-// Belirli bir frekansta ve sürede ses üreten fonksiyon
 void play_tone(double frequency, double duration) {
     int total_samples = (int)(SAMPLE_RATE * duration);
     int loops = total_samples / frames;
@@ -29,7 +26,6 @@ void play_tone(double frequency, double duration) {
         }
         snd_pcm_writei(handle, buffer, frames);
     }
-
     if (remainder > 0) {
         for (int j = 0; j < remainder; j++) {
             double t = (double)(loops * frames + j) / SAMPLE_RATE;
@@ -39,89 +35,80 @@ void play_tone(double frequency, double duration) {
     }
 }
 
-// Hamming(7,4) encode: 4 data biti  -> 7 kod bıtı
-int hamming_encode(int data) {
-    int d1 = (data >> 3) & 1;
-    int d2 = (data >> 2) & 1;
-    int d3 = (data >> 1) & 1;
-    int d4 = data & 1;
-    int p1 = d1 ^ d2 ^ d4;
-    int p2 = d1 ^ d3 ^ d4;
-    int p3 = d2 ^ d3 ^ d4;
-    return (p1 << 6) | (p2 << 5) | (d1 << 4) | (p3 << 3) | (d2 << 2) | (d3 << 1) | d4;
+// SECDED (13,8) encode
+int secded_encode(int data) {
+    int d[9];
+    for (int i = 1; i <= 8; i++) d[i] = (data >> (8 - i)) & 1;
+    int p1 = d[1] ^ d[2] ^ d[4] ^ d[5] ^ d[7];
+    int p2 = d[1] ^ d[3] ^ d[4] ^ d[6] ^ d[7];
+    int p4 = d[2] ^ d[3] ^ d[4] ^ d[8];
+    int p8 = d[5] ^ d[6] ^ d[7] ^ d[8];
+
+    int cw = 0;
+    cw |= (p1 << 0);
+    cw |= (p2 << 1);
+    cw |= (d[1] << 2);
+    cw |= (p4 << 3);
+    cw |= (d[2] << 4);
+    cw |= (d[3] << 5);
+    cw |= (d[4] << 6);
+    cw |= (p8 << 7);
+    cw |= (d[5] << 8);
+    cw |= (d[6] << 9);
+    cw |= (d[7] << 10);
+    cw |= (d[8] << 11);
+
+    int overall = 0;
+    for (int i = 0; i < 12; i++) overall ^= (cw >> i) & 1;
+    cw |= (overall << 12);
+    return cw;
 }
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        printf("Kullanım: %s <dosya_yolu>\n", argv[0]);
+        printf("Kullanım: %s <dosya>\n", argv[0]);
         return 1;
     }
 
-    // 1. ALSA ses aygıtını çalma modunda aç
     int rc = snd_pcm_open(&handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
-    if (rc < 0) {
-        fprintf(stderr, "Ses aygıtı açılamadı.\n");
-        return 1;
-    }
+    if (rc < 0) { fprintf(stderr, "Ses aygıtı açılamadı.\n"); return 1; }
 
     snd_pcm_hw_params_alloca(&params);
     snd_pcm_hw_params_any(handle, params);
     snd_pcm_hw_params_set_access(handle, params, SND_PCM_ACCESS_RW_INTERLEAVED);
     snd_pcm_hw_params_set_format(handle, params, SND_PCM_FORMAT_S16_LE);
     snd_pcm_hw_params_set_channels(handle, params, 1);
-
     unsigned int val = SAMPLE_RATE;
     snd_pcm_hw_params_set_rate_near(handle, params, &val, &dir);
     snd_pcm_hw_params(handle, params);
-
     snd_pcm_hw_params_get_period_size(params, &frames, &dir);
     buffer = (short *)malloc(frames * sizeof(short));
 
-    // 2. Dosyayı binary read (rb) modunda aç
     FILE *file = fopen(argv[1], "rb");
-    if (file == NULL) {
-        perror("Dosya açılamadı");
-        return 1;
-    }
+    if (!file) { perror("Dosya açılamadı"); return 1; }
 
-    // 3. PREAMBLE GÖNDER (Senkronizasyon için)
-    // 16 bit alternatif 10101010... deseni
-    printf("[Preamble] Senkronizasyon sinyali gönderiliyor...\n");
-    for (int i = 0; i < 16; i++) {
-        int bit = (i % 2 == 0) ? 1 : 0;
+    // Preamble: 32 bit alternating + sync byte 0xD5
+    printf("[Preamble] 32 bit alternating + 0xD5...\n");
+    for (int i = 0; i < 32; i++) {
+        int bit = i % 2;
         play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
     }
-
-    // Sync byte: 0xD5 (11010101) - Preamble'da görünmez, benzersiz
     for (int i = 7; i >= 0; i--) {
         int bit = (0xD5 >> i) & 1;
         play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
     }
 
-    printf("[ThruSonic Send] Dosya FSK modülasyonu ile gönderiliyor...\n");
-
+    printf("[ThruSonic Send] SECDED(13,8) ile gönderiliyor...\n");
     int ch;
     while ((ch = fgetc(file)) != EOF) {
-#if USE_HAMMING
-        // Hamming(7,4) Modu
-        int high = (ch >> 4) & 0x0F;
-        int low = ch & 0x0F;
-        int cw1 = hamming_encode(high);
-        int cw2 = hamming_encode(low);
-        for (int i = 6; i >= 0; i--) play_tone(((cw1 >> i) & 1) ? FREQ_1 : FREQ_0, BIT_DURATION);
-        for (int i = 6; i >= 0; i--) play_tone(((cw2 >> i) & 1) ? FREQ_1 : FREQ_0, BIT_DURATION);
-#else
-        // Normal mod (8 bit)
-        for (int i = 7; i >= 0; i--) {
-            int bit = (ch >> i) & 1;
+        int cw = secded_encode(ch);
+        for (int i = 12; i >= 0; i--) {
+            int bit = (cw >> i) & 1;
             play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
         }
-#endif
     }
 
     printf("[Gönderim Tamamlandı]\n");
-
-    // 5. Temizlik
     fclose(file);
     snd_pcm_drain(handle);
     snd_pcm_close(handle);
