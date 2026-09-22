@@ -24,33 +24,13 @@ frekanslardir. Ancak testlerde kullanılan dizustü bilgisayarların **dahili
 mikrofonları ve hoparlörleri** bu frekanslarda yeterli performansı
 **GÖSTERMEMİŞTİR.** Bu bir **donanım sınırıdır**, yazılım hatasıı değildir.
 
-
 ### Ultrasonik İçin Ne Gerekli?
 - **Harici USB mikrofon** (20kHz'e kadar düz frekans tepkisi)
 - **Harici hoparlör** (tweeter'lı sistem)
 - `FREQ_0 = 18000`, `FREQ_1 = 19000` yapmak yeterlidir.
 
-###  Hata Düzeltme: Hamming → SECDED
 
-İlk olarak **Hamming(7,4)** kodu denenmiştir. Ancak 2+ bit hatasında **yanlış
-düzeltme** yaptığı için veriyi daha da bozuyordu. Bu yüzden **SECDED(13,8)**
-(Single Error Correction, Double Error Detection) koduna geçilmiştir:
 
-- **8 data biti + 5 parity biti = 13 bit**
-- 1 bit hata → **düzeltilir** ✅
-- 2 bit hata → **tespit edilir, byte atlanır** (yanlış veri yazılmaz) ⚠️
-- 3+ bit hata → tespit edilemez (çok nadir)
-
-## 📊 Test Sonuçları (Gerçek Veriler)
-
-| Test | Frekanslar | Süre | Sonuç |
-|------|-----------|------|-------|
-| Text Transferi (sessiz) | 6kHz / 8kHz | 50ms/bit | ✅ "Merhaba ThruSonic!" |
-| Text Transferi (gürültülü) | 6kHz / 8kHz | 50ms/bit | ⚠️ "erhaba ThruSoic!" (2 harf bozuk) |
-| Binary Transferi (128 byte) | 6kHz / 8kHz | 50ms/bit | ❌ Yüksek hata oranı |
-| Ultrasonik (18/19 kHz) | 18kHz / 19kHz | - | ❌ Donanım sınırı |
-
-**Stabil Ayarlar:** 6.000 Hz (0) / 8.000 Hz (1), BIT_DURATION 0.05s, SECDED(13,8).
 
 ## 📁 Proje Dosyaları
 
@@ -62,6 +42,7 @@ düzeltme** yaptığı için veriyi daha da bozuyordu. Bu yüzden **SECDED(13,8)
 | `tsonic-fft.c` | FFT analiz modülü (test) |
 | `encoder.c` | Binary encoder |
 | `generator.c` | 440 Hz test sinyali üreteci |
+
 
 
 
@@ -84,6 +65,7 @@ head -c 32 /dev/urandom > binary_test.bin
 ./tsonic-rec & sleep 2 && ./tsonic-send binary_test.bin && sleep 2 && ./tsonic-recv recorded.raw cikti.bin
 cmp binary_test.bin cikti.bin
 
+```
 
 
 
