@@ -84,6 +84,12 @@ int main(int argc, char *argv[]) {
     int total_corrected = 0;
     int total_uncorrectable = 0;
 
+    // Adaptif eşık değişkenleri
+    double noise_floor = 0.0;
+    double dynamic_threshold = 10.0;
+    int calibration_count = 0;
+    #define CALIBRATION_WINDOWS 40
+
     printf("[ThruSonic Recv] Preamble aranıyor...\n");
 
     while (fread(buffer, sizeof(short), N, file) == N) {
@@ -93,9 +99,31 @@ int main(int argc, char *argv[]) {
         double mag_6k = sqrt(out[bin_6k][0]*out[bin_6k][0] + out[bin_6k][1]*out[bin_6k][1]);
         double mag_8k = sqrt(out[bin_8k][0]*out[bin_8k][0] + out[bin_8k][1]*out[bin_8k][1]);
 
-        if (!synced && mag_6k < MAG_THRESHOLD && mag_8k < MAG_THRESHOLD) continue;
+        double max_mag = (mag_6k > mag_8k) ? mag_6k : mag_8k;
 
-        if (mag_6k < MAG_THRESHOLD && mag_8k < MAG_THRESHOLD) {
+        // Kalibrasyon: ilk 40 pencere sessızzlik kabul edilir (kayıt 2 sn önce başlıyor)
+        if (calibration_count < CALIBRATION_WINDOWS) {
+            if (max_mag > noise_floor) noise_floor = max_mag;
+            calibration_count++;
+            if (calibration_count == CALIBRATION_WINDOWS) {
+                dynamic_threshold = noise_floor * 3.0;
+                if (dynamic_threshold < 0.5) dynamic_threshold = 0.5;
+                fprintf(stderr, "[KALİBRASYON] Gürültü: %.2f | Eşik: %.2f\n",
+                        noise_floor, dynamic_threshold);
+            }
+            continue;
+        }
+
+        // Sürekli güncelleme (senkronize olduktan sonra sessizlikte)
+        if (synced && max_mag < dynamic_threshold * 0.5) {
+            noise_floor = 0.95 * noise_floor + 0.05 * max_mag;
+            dynamic_threshold = noise_floor * 3.0;
+            if (dynamic_threshold < 0.5) dynamic_threshold = 0.5;
+        }
+
+        if (!synced && max_mag < dynamic_threshold) continue;
+
+        if (max_mag < dynamic_threshold) {
             silent_count++;
             if (silent_count > 25) break;
         } else {
