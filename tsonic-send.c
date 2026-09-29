@@ -87,6 +87,10 @@ int main(int argc, char *argv[]) {
     FILE *file = fopen(argv[1], "rb");
     if (!file) { perror("Dosya açılamadı"); return 1; }
 
+    // İlerrleme çubuğu için
+    int byte_count = 0;
+    printf("[ThruSonic Send] Dosya gönderiliyor: ");
+
     // Preamble: 32 bit alternating + sync byte 0xD5
     printf("[Preamble] 32 bit alternating + 0xD5...\n");
     for (int i = 0; i < 32; i++) {
@@ -106,9 +110,16 @@ int main(int argc, char *argv[]) {
             int bit = (cw >> i) & 1;
             play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
         }
+        
+        // İlerleme çubuğu: her 10 byte'ta bır nokta
+        byte_count++;
+        if (byte_count % 10 == 0) {
+            printf(".");
+            fflush(stdout);
+        }
     }
 
-    printf("[Gönderim Tamamlandı]\n");
+    printf("\n[Gönderim Tamamlandı] Toplam %d byte gönderildi.\n", byte_count);
     fclose(file);
     snd_pcm_drain(handle);
     snd_pcm_close(handle);
