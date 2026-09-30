@@ -84,6 +84,10 @@ int main(int argc, char *argv[]) {
     int total_corrected = 0;
     int total_uncorrectable = 0;
 
+    long expected_size = -1;  // -1 = henüz alınmadı
+    int size_bytes_read = 0;
+    long bytes_received = 0;
+
     // Adaptif eşık değişkenleri
     double noise_floor = 0.0;
     double dynamic_threshold = 10.0;
@@ -145,6 +149,9 @@ int main(int argc, char *argv[]) {
                 synced = 1;
                 codeword = 0;
                 bit_count = 0;
+                expected_size = 0;
+                size_bytes_read = 0;
+                bytes_received = 0;
             }
             continue;
         }
@@ -157,18 +164,35 @@ int main(int argc, char *argv[]) {
         if (bit_count == 13) {
             int corrected;
             int data = secded_decode(codeword, &corrected);
-            if (corrected == 1) {
-                total_corrected++;
-                fprintf(stderr, "[SECDED] 1-bit hata düzeltildi.\n");
-            } else if (corrected == -1) {
+
+            if (corrected == -1) {
                 total_uncorrectable++;
                 fprintf(stderr, "[SECDED] Düzeltilemez hata! Byte atlandı.\n");
             } else {
-                fwrite(&data, 1, 1, out_file);
+                if (corrected == 1) {
+                    total_corrected++;
+                }
+
+                // İlk 4 byte: doosya boyutu
+                if (size_bytes_read < 4) {
+                    expected_size = (expected_size << 8) | (data & 0xFF);
+                    size_bytes_read++;
+                    if (size_bytes_read == 4) {
+                        printf("[BOYUT] Beklenen dosya boyutu: %ld byte\n", expected_size);
+                    }
+                } else {
+                    fwrite(&data, 1, 1, out_file);
+                    bytes_received++;
+                    if (bytes_received >= expected_size) {
+                        printf("[TAMAMLANDI] Dosya tam olarak alındı.\n");
+                        break;
+                    }
+                }
             }
             codeword = 0;
             bit_count = 0;
         }
+
     }
 
     if (!synced) fprintf(stderr, "[UYARI] Preamble bulunamadı!\n");

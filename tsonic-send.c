@@ -102,9 +102,25 @@ int main(int argc, char *argv[]) {
         play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
     }
 
+    // Dosya boyuttunu hesapla ve gönder (4 byte, big-endian)
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    printf("[ThruSonic Send] Dosya boyutu: %ld byte\n", file_size);
+
+    for (int i = 3; i >= 0; i--) {
+        unsigned char size_byte = (file_size >> (i * 8)) & 0xFF;
+        int cw = secded_encode(size_byte);
+        for (int j = 12; j >= 0; j--) {
+            int bit = (cw >> j) & 1;
+            play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
+        }
+    }
+
     printf("[ThruSonic Send] SECDED(13,8) ile gönderiliyor...\n");
     int ch;
     while ((ch = fgetc(file)) != EOF) {
+
         int cw = secded_encode(ch);
         for (int i = 12; i >= 0; i--) {
             int bit = (cw >> i) & 1;
