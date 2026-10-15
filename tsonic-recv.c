@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <fftw3.h>
+#include <string.h>
 
 #define SAMPLE_RATE 44100
 #define BIT_DURATION 0.05
@@ -107,7 +108,13 @@ int main(int argc, char *argv[]) {
 
         // Kalibrasyon: ilk 40 pencere sessızzlik kabul edilir (kayıt 2 sn önce başlıyor)
         if (calibration_count < CALIBRATION_WINDOWS) {
-            if (max_mag > noise_floor) noise_floor = max_mag;
+            // İlk pencere: baslangıc değeri
+            if (calibration_count == 0) {
+                noise_floor = max_mag;
+            } else {
+                // Üstel ortalama
+                noise_floor = 0.8 * noise_floor + 0.2 * max_mag;
+            }
             calibration_count++;
             if (calibration_count == CALIBRATION_WINDOWS) {
                 dynamic_threshold = noise_floor * 3.0;
@@ -178,16 +185,51 @@ int main(int argc, char *argv[]) {
                     expected_size = (expected_size << 8) | (data & 0xFF);
                     size_bytes_read++;
                     if (size_bytes_read == 4) {
-                        printf("[BOYUT] Beklenen dosya boyutu: %ld byte\n", expected_size);
+                        // Boyut doğrulama: 100 MB üzeriyse şüpheli
+                        if (expected_size <= 0 || expected_size > 100000000) {
+                            fprintf(stderr, "[HATA] Şüphelı boyut: %ld byte, sync sıfırlanıyor.\n", expected_size);
+                            synced = 0;
+                            size_bytes_read = 0;
+                            expected_size = -1;
+                            bytes_received = 0;
+                            codeword = 0;
+                            bit_count = 0;
+                            memset(sync_buffer, 0, sizeof(sync_buffer));
+                        } else {
+                            printf("[BOYUT] Beklenen dosya boyutu: %ld byte\n", expected_size);
+                        }
                     }
-                } else {
+
+		 } else {
                     fwrite(&data, 1, 1, out_file);
                     bytes_received++;
+
+                    // İlerrleme çubuğu
+                    if (expected_size > 0) {
+                        int should_update = 0;
+                        if (expected_size < 50) should_update = 1;
+                        else if (bytes_received % (expected_size / 20 + 1) == 0) should_update = 1;
+
+                        if (should_update) {
+                            int pct = (int)((bytes_received * 100) / expected_size);
+                            if (pct > 100) pct = 100;
+                            printf("\r[");
+                            int filled = pct / 5;
+                            for (int p = 0; p < 20; p++) {
+                                if (p < filled) printf("█");
+                                else printf("░");
+                            }
+                            printf("] %3d%% (%ld/%ld byte)", pct, bytes_received, expected_size);
+                            fflush(stdout);
+                        }
+                    }
+
                     if (bytes_received >= expected_size) {
-                        printf("[TAMAMLANDI] Dosya tam olarak alındı.\n");
+                        printf("\n[TAMAMLANDI] Dosya tam olarak alındı.\n");
                         break;
                     }
                 }
+
             }
             codeword = 0;
             bit_count = 0;
