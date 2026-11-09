@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <alsa/asoundlib.h>
+#include <string.h>
 
 #define SAMPLE_RATE 44100
 #define BIT_DURATION 0.05   // 50ms per bit (yavas ama güvenılir)
@@ -101,6 +102,29 @@ int main(int argc, char *argv[]) {
         int bit = (0xD5 >> i) & 1;
         play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
     }
+
+        // Dosya adını gonder
+    const char *filename = argv[1];
+    const char *base = strrchr(filename, '/');
+    if (base) base++; else base = filename;
+    int name_len = strlen(base);
+    
+    // 1. İsim uzunluğunu (1 byte) SECDED ile gönder
+    int cw = secded_encode(name_len);
+    for (int j = 12; j >= 0; j--) {
+        int bit = (cw >> j) & 1;
+        play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
+    }
+    
+    // 2. İsmin kendisinii gönder
+    for (int i = 0; i < name_len; i++) {
+        cw = secded_encode(base[i]);
+        for (int j = 12; j >= 0; j--) {
+            int bit = (cw >> j) & 1;
+            play_tone(bit ? FREQ_1 : FREQ_0, BIT_DURATION);
+        }
+    }
+    printf("[ThruSonic Send] Dosya adı gönderildi: %s\n", base);
 
     // Dosya boyuttunu hesapla ve gönder (4 byte, big-endian)
     fseek(file, 0, SEEK_END);

@@ -89,6 +89,11 @@ int main(int argc, char *argv[]) {
     int size_bytes_read = 0;
     long bytes_received = 0;
 
+    int name_len = 0;
+    int name_chars_read = 0;
+    char received_name[256] = {0};
+    int rx_stage = 0; // 0=Boyut, 1=İsim Uzunluğu, 2=İsim, 3=Veri
+
     // Adaptif eşık değişkenleri
     double noise_floor = 0.0;
     double dynamic_threshold = 10.0;
@@ -168,6 +173,7 @@ int main(int argc, char *argv[]) {
         bit_count++;
         total_bits++;
 
+	//güncel düzenli
         if (bit_count == 13) {
             int corrected;
             int data = secded_decode(codeword, &corrected);
@@ -180,31 +186,48 @@ int main(int argc, char *argv[]) {
                     total_corrected++;
                 }
 
-                // İlk 4 byte: doosya boyutu
-                if (size_bytes_read < 4) {
+                if (rx_stage == 0) { // 1. Aşama: Boyut
                     expected_size = (expected_size << 8) | (data & 0xFF);
                     size_bytes_read++;
                     if (size_bytes_read == 4) {
-                        // Boyut doğrulama: 100 MB üzeriyse şüpheli
                         if (expected_size <= 0 || expected_size > 100000000) {
-                            fprintf(stderr, "[HATA] Şüphelı boyut: %ld byte, sync sıfırlanıyor.\n", expected_size);
-                            synced = 0;
-                            size_bytes_read = 0;
-                            expected_size = -1;
-                            bytes_received = 0;
-                            codeword = 0;
-                            bit_count = 0;
+                            fprintf(stderr, "\n[HATA] Şüpheli boyut, sync sıfırlanıyor.\n");
+                            synced = 0; size_bytes_read = 0; expected_size = -1;
+                            name_len = 0; name_chars_read = 0; rx_stage = 0;
+                            codeword = 0; bit_count = 0;
                             memset(sync_buffer, 0, sizeof(sync_buffer));
                         } else {
-                            printf("[BOYUT] Beklenen dosya boyutu: %ld byte\n", expected_size);
+                            rx_stage = 1;
+                            printf("\n[BOYUT] Beklenen dosya boyutu: %ld byte\n", expected_size);
                         }
                     }
-
-		 } else {
+                } else if (rx_stage == 1) { // 2. Aşama: İsim Uzunluğu
+                    name_len = data;
+                    printf("[BILGI] Dosya adı uzunluğu: %d byte\n", name_len);
+                    rx_stage = 2;
+                } else if (rx_stage == 2) { // 3. Aşama: İsim
+                    received_name[name_chars_read++] = (char)data;
+                    if (name_chars_read == name_len) {
+                        received_name[name_len] = '\0';
+                        printf("[BILGI] Alınan dosya adı: %s\n", received_name);
+                        
+                        if (out_file) fclose(out_file);
+                        char safe_name[300];
+                        snprintf(safe_name, sizeof(safe_name), "recv_%s", received_name);
+                        out_file = fopen(safe_name, "wb");
+                        
+                        if (!out_file) {
+                            perror("[HATA] Dosya oluşturulamadı, varsayılana dönülüyor");
+                            out_file = fopen(argv[2], "wb");
+                        } else {
+                            printf("[SISTEM] Çıktı dosyası oluşturuldu: %s\n", safe_name);
+                        }
+                        rx_stage = 3;
+                    }
+                } else if (rx_stage == 3) { // 4. Aşama: Veri
                     fwrite(&data, 1, 1, out_file);
                     bytes_received++;
 
-                    // İlerrleme çubuğu
                     if (expected_size > 0) {
                         int should_update = 0;
                         if (expected_size < 50) should_update = 1;
@@ -229,12 +252,10 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                 }
-
             }
             codeword = 0;
             bit_count = 0;
         }
-
     }
 
     if (!synced) fprintf(stderr, "[UYARI] Preamble bulunamadı!\n");
